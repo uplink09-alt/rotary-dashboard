@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Tesorería — Rotary Santa Teresita</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F0F4F8; font-family: 'Segoe UI', Inter, sans-serif; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  ::-webkit-scrollbar { width: 4px; } 
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const SHEET_ID = "1NdHKQ1x8RBa5E7TDa5nNjlkQo9PyF07KvnS5YwrTixI";
+const sheetUrl = (sheet) =>
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}`;
+
+const parseGviz = (raw) => {
+  const json = JSON.parse(raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, ""));
+  const cols = json.table.cols.map(c => c.label);
+  const rows = (json.table.rows || []).map(r =>
+    Object.fromEntries(cols.map((c, i) => [c, r.c?.[i]?.v ?? null]))
+  );
+  return rows;
+};
+
+const fetchSheet = async (name) => {
+  const res = await fetch(sheetUrl(name));
+  const txt = await res.text();
+  return parseGviz(txt);
+};
+
+// Socios hardcodeados desde la planilla (estructura fija)
+const SOCIOS = [
+  { nombre: "Barbero, Nicolas",               club: "Santa Teresita" },
+  { nombre: "Bertolini, Mauro Alberto",        club: "Santa Teresita" },
+  { nombre: "Boccazzi, Mariano",              club: "Santa Teresita" },
+  { nombre: "Bidinost, Lucia Irene",          club: "Santa Teresita" },
+  { nombre: "Bodlak, Rolando Carlos",         club: "Santa Teresita" },
+  { nombre: "Camino, Jose Luis",              club: "Santa Teresita" },
+  { nombre: "Carrizo, Diego Ernesto",         club: "Santa Teresita" },
+  { nombre: "Catracchia, Daniel Jorge",       club: "Santa Teresita" },
+  { nombre: "Cladakis, Hector Miguel",        club: "Santa Teresita" },
+  { nombre: "de Martino Coll, Andrés",        club: "Santa Teresita" },
+  { nombre: "de Martino Coll, Marcelo Adrian",club: "Santa Teresita" },
+  { nombre: "Ferre, Susana Leonor",           club: "Santa Teresita" },
+  { nombre: "Franz, Jose Luis",               club: "Santa Teresita" },
+  { nombre: "Gonzalez, Jorge Ruben",          club: "Santa Teresita" },
+  { nombre: "Mateos, Miguel Luis",            club: "Santa Teresita" },
+  { nombre: "Medeot, Melina",                 club: "Santa Teresita" },
+  { nombre: "Mellera, Rodrigo",              club: "Santa Teresita" },
+  { nombre: "Miranda, Maria Laura",           club: "Santa Teresita" },
+  { nombre: "Pactat, Gabriel Alejandro",      club: "Santa Teresita" },
+  { nombre: "Padin, Daniel Luis",             club: "Santa Teresita" },
+  { nombre: "Prado Galeano, Fabio",           club: "Santa Teresita" },
+  { nombre: "Rosenthal, Horacio Edgardo",     club: "Santa Teresita" },
+  { nombre: "Saavedra, Julio Jorge",          club: "Santa Teresita" },
+  { nombre: "Socolobsky, Pablo Enrique",      club: "Santa Teresita" },
+  { nombre: "Tenales, Adrian Nestor",         club: "Santa Teresita" },
+  { nombre: "Vargas, Flora Teresa",           club: "Santa Teresita" },
+  { nombre: "Waters, Marcelo Raul",           club: "Santa Teresita" },
+  { nombre: "Cabrera, Ana Karina",            club: "Gral. Lavalle" },
+  { nombre: "Marazzi, Ricardo Alberto",       club: "Gral. Lavalle" },
+  { nombre: "Pascua, Alfredo Adrian",         club: "Gral. Lavalle" },
+  { nombre: "Alonso Garcia, Leonela Anahi",   club: "Palermo" },
+  { nombre: "Bockel, Maria Luz",              club: "Palermo" },
+  { nombre: "Garcia Torralba, Lidia",         club: "Palermo" },
+  { nombre: "Neira, María Teresa",            club: "Palermo" },
+  { nombre: "Rovira, Maria De La Paz",        club: "Palermo" },
+  { nombre: "Sedano Acosta, Marcela",         club: "Palermo" },
+];
+
+const MESES_ATRASO = ["ene-26","feb-26","mar-26","abr-26","may-26","jun-26"];
+const MESES_PERIODO = ["jul-26","ago-26","sep-26","oct-26","nov-26","dic-26","ene-27","feb-27","mar-27","abr-27","may-27","jun-27"];
+const TODOS_MESES = [...MESES_ATRASO, ...MESES_PERIODO];
+
+const CLUB_COLORS = { "Santa Teresita": "#1A3A6B", "Gral. Lavalle": "#0F766E", "Palermo": "#92400E" };
+const FONDO_COLORS = { Club: "#1A3A6B", Intercambios: "#0F766E", Cocina: "#92400E" };
+const TIPO_COLORS = {
+  "Ingreso":               { bg: "#F0FDF4", text: "#15803D" },
+  "Egreso":                { bg: "#FEF2F2", text: "#DC2626" },
+  "Custodia recibida":     { bg: "#EFF6FF", text: "#1D4ED8" },
+  "Custodia devuelta":     { bg: "#FFF7ED", text: "#C2410C" },
+  "Transferencia entrada": { bg: "#FAF5FF", text: "#7E22CE" },
+  "Transferencia salida":  { bg: "#FFF7ED", text: "#C2410C" },
+};
+
+const ars = (n) => n == null ? "—" : "$" + Math.abs(Number(n)).toLocaleString("es-AR");
+const usd = (n) => n == null ? "—" : "U$S " + Math.abs(Number(n)).toLocaleString("es-AR");
+const fmtDate = (v) => {
+  if (!v) return "—";
+  if (typeof v === "string" && v.includes("-")) { const [y,m,d] = v.split("-"); return `${d}/${m}/${y}`; }
+  if (typeof v === "number") return new Date(Math.round((v-25569)*86400*1000)).toLocaleDateString("es-AR");
+  return String(v);
+};
+const diasHasta = (v) => {
+  if (!v) return 999;
+  const date = typeof v === "number" ? new Date(Math.round((v-25569)*86400*1000)) : new Date(v);
+  return Math.ceil((date - new Date()) / 86400000);
+};
+const getByKey = (row, keyword) => {
+  const k = Object.keys(row).find(k => k.toLowerCase().includes(keyword.toLowerCase()));
+  return k ? Number(row[k]) || 0 : 0;
+};
+
+function Pill({ tipo }) {
+  const c = TIPO_COLORS[tipo] || { bg:"#F1F5F9", text:"#475569" };
+  const esPos = ["Ingreso","Custodia recibida","Transferencia entrada"].includes(tipo);
+  return <span style={{ background:c.bg, color:c.text, padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:700 }}>{esPos?"+":"−"} {tipo}</span>;
+}
+
+function Spinner() {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"60px 0", gap:14 }}>
+      <div style={{ width:36, height:36, border:"3px solid #E2E8F0", borderTop:"3px solid #1A3A6B", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+      <div style={{ fontSize:13, color:"#94A3B8" }}>Cargando datos...</div>
+    </div>
+  );
+}
+
+function CuotasTab({ cuotasData }) {
+  const [filterClub, setFilterClub] = useState("Todos");
+  const [filterEstado, setFilterEstado] = useState("Todos");
+  const [search, setSearch] = useState("");
+
+  // Parsear datos de cuotas desde Google Sheets
+  // cuotasData viene con columnas: Socio, Club, ene-26, feb-26, ... jun-27, Total pagado, Meses pagados, Atrasos pagados
+  const sociosConDatos = useMemo(() => {
+    if (!cuotasData || cuotasData.length === 0) {
+      // Fallback a lista hardcodeada sin pagos
+      return SOCIOS.map(s => ({ ...s, pagos: {}, totalPagado: 0, mesesPagados: 0, atrasosPagados: 0 }));
+    }
+    return SOCIOS.map(socio => {
+      const row = cuotasData.find(r => r["Socio"] === socio.nombre) || {};
+      const pagos = {};
+      TODOS_MESES.forEach(m => { pagos[m] = row[m] || null; });
+      return {
+        ...socio,
+        pagos,
+        totalPagado: Number(row["Total pagado"]) || 0,
+        mesesPagados: Number(row["Meses pagados"]) || 0,
+        atrasosPagados: Number(row["Atrasos pagados"]) || 0,
+      };
+    });
+  }, [cuotasData]);
+
+  const mesActual = useMemo(() => {
+    const now = new Date();
+    const m = String(now.getMonth()+1).padStart(2,"0");
+    const y = String(now.getFullYear()).slice(2);
+    return `${["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"][now.getMonth()]}-${y}`;
+  }, []);
+
+  const mesIdx = MESES_PERIODO.indexOf(mesActual);
+  const mesesTranscurridos = mesIdx >= 0 ? mesIdx + 1 : MESES_PERIODO.length;
+
+  const sociosFiltrados = useMemo(() => sociosConDatos.filter(s => {
+    if (filterClub !== "Todos" && s.club !== filterClub) return false;
+    if (filterEstado === "Al día" && s.mesesPagados < mesesTranscurridos) return false;
+    if (filterEstado === "Deben" && s.mesesPagados >= mesesTranscurridos) return false;
+    if (search && !s.nombre.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }), [sociosConDatos, filterClub, filterEstado, search]);
+
+  const resumen = useMemo(() => ({
+    total: sociosConDatos.length,
+    alDia: sociosConDatos.filter(s => s.mesesPagados >= mesesTranscurridos).length,
+    deben: sociosConDatos.filter(s => s.mesesPagados < mesesTranscurridos && s.mesesPagados >= 0).length,
+    porClub: {
+      "Santa Teresita": sociosConDatos.filter(s => s.club === "Santa Teresita").length,
+      "Gral. Lavalle":  sociosConDatos.filter(s => s.club === "Gral. Lavalle").length,
+      "Palermo":        sociosConDatos.filter(s => s.club === "Palermo").length,
+    }
+  }), [sociosConDatos, mesesTranscurridos]);
+
+  const pill = (active, color) => ({
+    padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700,
+    border:"none", cursor:"pointer",
+    background: active ? (color || "#1A3A6B") : "#F1F5F9",
+    color: active ? "#fff" : "#64748B",
+  });
+
+  return (
+    <div>
+      {/* Stats */}
+      <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+        {[
+          { label:"Total socios", val:resumen.total, color:"#1A3A6B" },
+          { label:"Al día", val:resumen.alDia, color:"#15803D" },
+          { label:"Con deuda", val:resumen.deben, color:"#DC2626" },
+        ].map(s => (
+          <div key={s.label} style={{ flex:"1 1 100px", background:"#F8FAFC", borderRadius:12, padding:"12px 16px", border:"1.5px solid #E2E8F0" }}>
+            <div style={{ fontSize:22, fontWeight:800, color:s.color }}>{s.val}</div>
+            <div style={{ fontSize:11, color:"#94A3B8", fontWeight:600 }}>{s.label}</div>
+          </div>
+        ))}
+        {Object.entries(resumen.porClub).map(([club, cant]) => (
+          <div key={club} style={{ flex:"1 1 100px", background:"#F8FAFC", borderRadius:12, padding:"12px 16px", border:`1.5px solid ${CLUB_COLORS[club]}22` }}>
+            <div style={{ fontSize:22, fontWeight:800, color:CLUB_COLORS[club] }}>{cant}</div>
+            <div style={{ fontSize:11, color:"#94A3B8", fontWeight:600 }}>{club}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar socio..."
+          style={{ flex:"1 1 150px", padding:"7px 12px", borderRadius:8, border:"1.5px solid #E2E8F0", fontSize:13, outline:"none", background:"#F8FAFC", fontFamily:"inherit" }} />
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+          {["Todos","Santa Teresita","Gral. Lavalle","Palermo"].map(c => (
+            <button key={c} style={pill(filterClub===c, CLUB_COLORS[c])} onClick={() => setFilterClub(c)}>{c}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:5 }}>
+          {["Todos","Al día","Deben"].map(e => (
+            <button key={e} style={pill(filterEstado===e, e==="Al día"?"#15803D":e==="Deben"?"#DC2626":null)} onClick={() => setFilterEstado(e)}>{e}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Lista socios */}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {sociosFiltrados.map((s, i) => {
+          const alDia = s.mesesPagados >= mesesTranscurridos;
+          const mesesDeuda = Math.max(0, mesesTranscurridos - s.mesesPagados);
+          const color = CLUB_COLORS[s.club] || "#1A3A6B";
+          return (
+            <div key={i} style={{ padding:"12px 14px", borderRadius:12, background:"#F8FAFC", borderLeft:`3px solid ${alDia ? "#22C55E" : "#EF4444"}`, display:"grid", gridTemplateColumns:"1fr auto", gap:10, alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:13, fontWeight:700, color:"#0F172A" }}>{s.nombre}</div>
+                <div style={{ fontSize:11, color:"#94A3B8", marginTop:3, display:"flex", gap:10 }}>
+                  <span style={{ color, fontWeight:600 }}>{s.club}</span>
+                  {s.totalPagado > 0 && <span>Pagado: {ars(s.totalPagado)}</span>}
+                  {s.atrasosPagados > 0 && <span>Atrasos: {ars(s.atrasosPagados)}</span>}
+                </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                {alDia ? (
+                  <span style={{ background:"#F0FDF4", color:"#15803D", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>✓ Al día</span>
+                ) : (
+                  <div>
+                    <span style={{ background:"#FEF2F2", color:"#DC2626", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>
+                      {mesesDeuda} {mesesDeuda === 1 ? "mes" : "meses"} adeudado{mesesDeuda > 1 ? "s" : ""}
+                    </span>
+                    <div style={{ fontSize:11, color:"#94A3B8", marginTop:3 }}>{s.mesesPagados} de {mesesTranscurridos} pagados</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab]               = useState("saldos");
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
+  const [resumen, setResumen]       = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
+  const [obligaciones, setObligaciones] = useState([]);
+  const [cuotas, setCuotas]         = useState([]);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [filterFondo, setFilterFondo] = useState("Todos");
+  const [filterTipo, setFilterTipo]   = useState("Todos");
+
+  const load = async () => {
+    setLoading(true); setError(null);
+    try {
+      const [res, mov, obl, cuo] = await Promise.all([
+        fetchSheet("Resumen"),
+        fetchSheet("Movimientos"),
+        fetchSheet("Obligaciones"),
+        fetchSheet("Cuotas"),
+      ]);
+      setResumen(res);
+      setMovimientos(mov.filter(m => m["Fecha"] && m["Monto"]).slice(-50).reverse());
+      setObligaciones(obl.filter(o => o["Obligación"]));
+      // Cuotas: filtrar filas válidas (con nombre de socio)
+      setCuotas(cuo.filter(r => r["Socio"] && !r["Socio"].includes("Valor cuota")));
+      setLastUpdate(new Date().toLocaleTimeString("es-AR"));
+    } catch(e) {
+      setError("No se pudo conectar con Google Sheets. Verificá tu conexión a internet.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const fondos = ["Club", "Intercambios", "Cocina"];
+  const saldoRow  = (f) => resumen.find(r => String(Object.values(r)[0]||"").trim() === f) || {};
+  const totalRow  = resumen.find(r => String(Object.values(r)[0]||"").includes("TOTAL")) || {};
+  const grandARS  = getByKey(totalRow, "ARS Total");
+  const grandUSD  = getByKey(totalRow, "USD Total");
+
+  const movFiltrados = movimientos.filter(m => {
+    if (filterFondo !== "Todos" && m["Fondo"] !== filterFondo) return false;
+    if (filterTipo  !== "Todos" && m["Tipo"]  !== filterTipo)  return false;
+    return true;
+  });
+
+  const oblPendientes = obligaciones
+    .filter(o => o["Estado"] !== "Pagado" && diasHasta(o["Vencimiento"]) < 90)
+    .sort((a,b) => diasHasta(a["Vencimiento"]) - diasHasta(b["Vencimiento"]));
+  const proxUrgentes = oblPendientes.filter(o => diasHasta(o["Vencimiento"]) <= 15);
+
+  const tabStyle = (t) => ({
+    background:"none", border:"none", padding:"9px 14px", cursor:"pointer",
+    fontSize:12, fontWeight:700, fontFamily:"inherit",
+    color: tab===t ? "#1A3A6B" : "#94A3B8",
+    borderBottom: tab===t ? "2px solid #1A3A6B" : "2px solid transparent",
+    marginBottom:-2, whiteSpace:"nowrap",
+  });
+  const pill = (active) => ({
+    padding:"4px 11px", borderRadius:20, fontSize:12, fontWeight:700,
+    border:"none", cursor:"pointer",
+    background: active ? "#1A3A6B" : "#F1F5F9",
+    color: active ? "#fff" : "#64748B",
+  });
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#F0F4F8" }}>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(135deg,#1A3A6B 0%,#0F2347 100%)", padding:"18px 16px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+          <div style={{ width:28, height:28, borderRadius:"50%", background:"#F7CA45", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚙</div>
+          <span style={{ color:"#F7CA45", fontWeight:800, fontSize:15 }}>Rotary Club Santa Teresita</span>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:8 }}>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:19 }}>Dashboard de Tesorería</div>
+            <div style={{ color:"rgba(255,255,255,0.45)", fontSize:11, marginTop:2 }}>2026/2027 {lastUpdate && `· ${lastUpdate}`}</div>
+          </div>
+          <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+            {!loading && !error && (grandARS > 0 || grandUSD > 0) && (
+              <div style={{ textAlign:"right" }}>
+                {grandARS > 0 && <div style={{ color:"#F7CA45", fontWeight:800, fontSize:18 }}>{ars(grandARS)}</div>}
+                {grandUSD > 0 && <div style={{ color:"rgba(255,255,255,0.7)", fontSize:13, fontWeight:700 }}>{usd(grandUSD)}</div>}
+              </div>
+            )}
+            <button onClick={load} style={{ background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", color:"#fff", padding:"7px 12px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>↻</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"16px 12px" }}>
+        {/* Alerta */}
+        {!loading && proxUrgentes.length > 0 && (
+          <div style={{ background:"#FEF3C7", border:"1.5px solid #FCD34D", borderRadius:12, padding:"10px 14px", marginBottom:14, display:"flex", alignItems:"center", gap:8 }}>
+            <span>⚠️</span>
+            <div style={{ fontSize:12 }}>
+              <strong style={{ color:"#92400E" }}>Obligación próxima: </strong>
+              <span style={{ color:"#78350F" }}>{proxUrgentes.map(o => `${o["Obligación"]} (${diasHasta(o["Vencimiento"])} días)`).join(" · ")}</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 1px 4px rgba(0,0,0,0.07)" }}>
+          {/* Tabs */}
+          <div style={{ display:"flex", borderBottom:"2px solid #F1F5F9", padding:"0 6px", overflowX:"auto" }}>
+            {[["saldos","💰 Saldos"],["movimientos","📋 Movimientos"],["cuotas","👥 Cuotas"],["obligaciones","📅 Obligaciones"]].map(([t,l]) => (
+              <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>{l}</button>
+            ))}
+          </div>
+
+          <div style={{ padding:"16px 14px" }}>
+            {loading && <Spinner />}
+            {error && (
+              <div style={{ textAlign:"center", padding:"40px 0" }}>
+                <div style={{ fontSize:32, marginBottom:10 }}>⚠️</div>
+                <div style={{ color:"#EF4444", fontWeight:700, marginBottom:12, fontSize:14 }}>{error}</div>
+                <button onClick={load} style={{ background:"#1A3A6B", color:"#fff", border:"none", padding:"9px 22px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>Reintentar</button>
+              </div>
+            )}
+
+            {!loading && !error && (
+              <>
+                {/* SALDOS */}
+                {tab === "saldos" && (
+                  <div>
+                    {resumen.length === 0 ? (
+                      <div style={{ textAlign:"center", padding:"40px 0", color:"#94A3B8" }}>
+                        <div style={{ fontSize:36, marginBottom:10 }}>📊</div>
+                        <p style={{ fontSize:13 }}>La planilla aún no tiene movimientos.<br/>Los saldos aparecerán automáticamente cuando empieces a operar.</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:12 }}>
+                          {fondos.map(f => {
+                            const row = saldoRow(f);
+                            const arsEf = getByKey(row,"ARS Efectivo"), arsBa = getByKey(row,"ARS Banco");
+                            const arsTo = getByKey(row,"ARS Total") || arsEf+arsBa;
+                            const usdEf = getByKey(row,"USD Efectivo"), usdBa = getByKey(row,"USD Banco");
+                            const usdTo = getByKey(row,"USD Total") || usdEf+usdBa;
+                            const color = FONDO_COLORS[f]||"#1A3A6B";
+                            return (
+                              <div key={f} style={{ flex:"1 1 180px", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 3px rgba(0,0,0,0.07)" }}>
+                                <div style={{ background:color, padding:"10px 14px" }}>
+                                  <div style={{ color:"rgba(255,255,255,0.55)", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:0.8 }}>Fondo</div>
+                                  <div style={{ color:"#fff", fontSize:16, fontWeight:800 }}>{f}</div>
+                                </div>
+                                <div style={{ padding:"12px 14px", background:"#FAFBFC" }}>
+                                  {arsTo > 0 && <div style={{ marginBottom: usdTo>0?8:0 }}>
+                                    <div style={{ fontSize:18, fontWeight:800, color:"#0F172A" }}>{ars(arsTo)}</div>
+                                    <div style={{ fontSize:11, color:"#94A3B8", marginTop:2, display:"flex", gap:8 }}><span>💵 {ars(arsEf)}</span><span>🏦 {ars(arsBa)}</span></div>
+                                  </div>}
+                                  {usdTo > 0 && <div style={{ borderTop: arsTo>0?"1px solid #E2E8F0":"none", paddingTop: arsTo>0?8:0 }}>
+                                    <div style={{ fontSize:16, fontWeight:800, color:"#0F766E" }}>{usd(usdTo)}</div>
+                                    <div style={{ fontSize:11, color:"#94A3B8", marginTop:2, display:"flex", gap:8 }}><span>💵 {usd(usdEf)}</span><span>🏦 {usd(usdBa)}</span></div>
+                                  </div>}
+                                  {arsTo===0 && usdTo===0 && <div style={{ fontSize:12, color:"#CBD5E1" }}>Sin movimientos aún</div>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ background:"#F8FAFC", borderRadius:12, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", border:"1.5px solid #E2E8F0" }}>
+                          <span style={{ fontSize:13, fontWeight:700, color:"#64748B" }}>TOTAL GENERAL</span>
+                          <div style={{ textAlign:"right" }}>
+                            {grandARS > 0 && <div style={{ fontSize:18, fontWeight:800, color:"#0F172A" }}>{ars(grandARS)}</div>}
+                            {grandUSD > 0 && <div style={{ fontSize:14, fontWeight:700, color:"#0F766E" }}>{usd(grandUSD)}</div>}
+                            {grandARS===0 && grandUSD===0 && <div style={{ fontSize:13, color:"#CBD5E1" }}>$0</div>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* MOVIMIENTOS */}
+                {tab === "movimientos" && (
+                  <div>
+                    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+                      {["Todos","Club","Intercambios","Cocina"].map(f => (
+                        <button key={f} style={pill(filterFondo===f)} onClick={() => setFilterFondo(f)}>{f}</button>
+                      ))}
+                      <span style={{ width:1, background:"#E2E8F0", display:"inline-block" }} />
+                      {["Todos","Ingreso","Egreso"].map(t => (
+                        <button key={t} style={pill(filterTipo===t)} onClick={() => setFilterTipo(t)}>{t}</button>
+                      ))}
+                    </div>
+                    {movFiltrados.length === 0 ? (
+                      <div style={{ textAlign:"center", padding:"40px 0", color:"#94A3B8" }}>
+                        <div style={{ fontSize:36, marginBottom:10 }}>📋</div>
+                        <p style={{ fontSize:13, margin:0 }}>Sin movimientos cargados todavía.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                        {movFiltrados.map((m,i) => {
+                          const tipo=m["Tipo"]||"", fondo=m["Fondo"]||"";
+                          const moneda=m["Moneda"]||"ARS", monto=Number(m["Monto"])||0;
+                          const esPos=["Ingreso","Custodia recibida","Transferencia entrada"].includes(tipo);
+                          return (
+                            <div key={i} style={{ display:"grid", gridTemplateColumns:"80px 1fr auto", gap:8, alignItems:"center", padding:"10px 12px", background:"#F8FAFC", borderRadius:10, borderLeft:`3px solid ${FONDO_COLORS[fondo]||"#CBD5E1"}` }}>
+                              <div>
+                                <div style={{ fontSize:11, fontWeight:700, color:"#94A3B8" }}>{fmtDate(m["Fecha"])}</div>
+                                <div style={{ marginTop:3 }}><Pill tipo={tipo} /></div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize:13, fontWeight:700, color:"#0F172A" }}>{m["Categoría"]||"—"}</div>
+                                <div style={{ fontSize:11, color:"#94A3B8" }}>{m["Detalle"]&&<span>{m["Detalle"]} · </span>}<span style={{ color:FONDO_COLORS[fondo]||"#64748B", fontWeight:600 }}>{fondo}</span></div>
+                              </div>
+                              <div style={{ textAlign:"right", fontSize:14, fontWeight:800, color:esPos?"#15803D":"#DC2626" }}>
+                                {esPos?"+":"−"}{moneda==="USD"?usd(monto):ars(monto)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* CUOTAS */}
+                {tab === "cuotas" && <CuotasTab cuotasData={cuotas} />}
+
+                {/* OBLIGACIONES */}
+                {tab === "obligaciones" && (
+                  <div>
+                    {oblPendientes.length === 0 ? (
+                      <div style={{ textAlign:"center", padding:"40px 0", color:"#94A3B8" }}>
+                        <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+                        <p style={{ fontSize:13, margin:0 }}>Sin obligaciones próximas.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                        {oblPendientes.map((o,i) => {
+                          const dias=diasHasta(o["Vencimiento"]), urgente=dias<=15;
+                          return (
+                            <div key={i} style={{ padding:"12px 14px", borderRadius:12, background:urgente?"#FEF3C7":"#F8FAFC", border:`1.5px solid ${urgente?"#FCD34D":"#E2E8F0"}`, display:"grid", gridTemplateColumns:"1fr auto", gap:10, alignItems:"center" }}>
+                              <div>
+                                <div style={{ fontSize:13, fontWeight:700, color:"#0F172A" }}>{o["Obligación"]}</div>
+                                <div style={{ fontSize:12, color:"#94A3B8", marginTop:2 }}>{o["Período"]} · Vence {fmtDate(o["Vencimiento"])}</div>
+                              </div>
+                              <div style={{ textAlign:"right" }}>
+                                {o["Estimado ARS"] && <div style={{ fontSize:13, fontWeight:800, color:"#0F172A" }}>{ars(o["Estimado ARS"])}</div>}
+                                <div style={{ fontSize:11, fontWeight:700, marginTop:2, color:urgente?"#92400E":"#64748B" }}>{urgente?`⚠ ${dias} días`:`${dias} días`}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        <div style={{ textAlign:"center", fontSize:11, color:"#CBD5E1", marginTop:12 }}>Conectado a Google Sheets · Datos en tiempo real</div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
