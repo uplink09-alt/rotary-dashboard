@@ -153,15 +153,20 @@ function CuotasTab({ cuotasData }) {
     });
   }, [cuotasData]);
 
-  const mesActual = useMemo(() => {
+  // Calcular cuántos meses del período 2026-2027 ya vencieron
+  // El período arranca jul-26, así que solo contamos meses cuya fecha de vencimiento ya pasó
+  const mesesTranscurridos = useMemo(() => {
     const now = new Date();
-    const m = String(now.getMonth()+1).padStart(2,"0");
-    const y = String(now.getFullYear()).slice(2);
-    return `${["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"][now.getMonth()]}-${y}`;
+    const fechasMeses = {
+      "jul-26": new Date(2026,6,1), "ago-26": new Date(2026,7,1),
+      "sep-26": new Date(2026,8,1), "oct-26": new Date(2026,9,1),
+      "nov-26": new Date(2026,10,1),"dic-26": new Date(2026,11,1),
+      "ene-27": new Date(2027,0,1), "feb-27": new Date(2027,1,1),
+      "mar-27": new Date(2027,2,1), "abr-27": new Date(2027,3,1),
+      "may-27": new Date(2027,4,1), "jun-27": new Date(2027,5,1),
+    };
+    return MESES_PERIODO.filter(m => fechasMeses[m] < now).length;
   }, []);
-
-  const mesIdx = MESES_PERIODO.indexOf(mesActual);
-  const mesesTranscurridos = mesIdx >= 0 ? mesIdx + 1 : MESES_PERIODO.length;
 
   const sociosFiltrados = useMemo(() => sociosConDatos.filter(s => {
     if (filterClub !== "Todos" && s.club !== filterClub) return false;
@@ -334,7 +339,7 @@ function App() {
       {/* Header */}
       <div style={{ background:"linear-gradient(135deg,#1A3A6B 0%,#0F2347 100%)", padding:"18px 16px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-          <div style={{ width:28, height:28, borderRadius:"50%", background:"#F7CA45", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚙</div>
+          <img src="https://drive.google.com/uc?export=view&id=1R4vnTlu2MCk0j774V0vS2L_cLA88Pk05" alt="Logo Rotary" style={{ width:40, height:40, borderRadius:"50%", objectFit:"cover", border:"2px solid #F7CA45" }} />
           <span style={{ color:"#F7CA45", fontWeight:800, fontSize:15 }}>Rotary Club Santa Teresita</span>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:8 }}>
