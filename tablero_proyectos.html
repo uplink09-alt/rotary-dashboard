@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tablero de Proyectos — Rotary Santa Teresita</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F0F4F8; font-family: 'Segoe UI', Inter, sans-serif; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const SHEET_ID = "1jGmL1BC61IsGPkP9-1r7omew4BhTh3uw_X-1CklBxLU";
+const sheetUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Proyectos`;
+
+const parseGviz = (raw) => {
+  const json = JSON.parse(raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, ""));
+  const cols = json.table.cols.map(c => c.label);
+  const rows = (json.table.rows || []).map(r =>
+    Object.fromEntries(cols.map((c, i) => [c, r.c?.[i]?.v ?? null]))
+  );
+  return rows;
+};
+
+const fmtDate = (v) => {
+  if (!v) return null;
+  if (typeof v === "string" && v.includes("/")) return v;
+  if (typeof v === "string" && v.includes("-")) { const [y,m,d] = v.split("-"); return `${d}/${m}/${y}`; }
+  if (typeof v === "number") return new Date(Math.round((v-25569)*86400*1000)).toLocaleDateString("es-AR");
+  return String(v);
+};
+
+const fmtARS = (v) => {
+  if (!v || Number(v) === 0) return null;
+  return "$" + Number(v).toLocaleString("es-AR");
+};
+
+const isVencido = (p) => {
+  if (!p["Fecha fin"] || p["Estado"] === "Finalizado") return false;
+  let date;
+  if (typeof p["Fecha fin"] === "number") date = new Date(Math.round((p["Fecha fin"]-25569)*86400*1000));
+  else date = new Date(p["Fecha fin"]);
+  return date < new Date();
+};
+
+const ESTADO_COLORS = {
+  "Iniciado":    { bg:"#EFF6FF", text:"#1D4ED8", dot:"#3B82F6" },
+  "En curso":    { bg:"#F0FDF4", text:"#15803D", dot:"#22C55E" },
+  "Pausado":     { bg:"#FFF7ED", text:"#C2410C", dot:"#F97316" },
+  "Etapa final": { bg:"#FAF5FF", text:"#7E22CE", dot:"#A855F7" },
+  "Finalizado":  { bg:"#F1F5F9", text:"#475569", dot:"#94A3B8" },
+};
+
+const PRIORIDAD_COLORS = {
+  "Alta":  { bg:"#FEF2F2", text:"#DC2626" },
+  "Media": { bg:"#FFFBEB", text:"#D97706" },
+  "Baja":  { bg:"#F0FDF4", text:"#16A34A" },
+};
+
+function Badge({ estado }) {
+  const c = ESTADO_COLORS[estado] || ESTADO_COLORS["Iniciado"];
+  return (
+    <span style={{ background:c.bg, color:c.text, display:"inline-flex", alignItems:"center", gap:5, padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>
+      <span style={{ width:6, height:6, borderRadius:"50%", background:c.dot, display:"inline-block" }} />
+      {estado}
+    </span>
+  );
+}
+
+function PrioBadge({ prioridad }) {
+  if (!prioridad) return null;
+  const c = PRIORIDAD_COLORS[prioridad] || { bg:"#F1F5F9", text:"#475569" };
+  return <span style={{ background:c.bg, color:c.text, padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:700 }}>↑ {prioridad}</span>;
+}
+
+function Spinner() {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"60px 0", gap:14 }}>
+      <div style={{ width:36, height:36, border:"3px solid #E2E8F0", borderTop:"3px solid #1A3A6B", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+      <div style={{ fontSize:13, color:"#94A3B8" }}>Cargando proyectos...</div>
+    </div>
+  );
+}
+
+function App() {
+  const [proyectos, setProyectos] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [filterEstado, setFilterEstado]     = useState("Todos");
+  const [filterPrioridad, setFilterPrioridad] = useState("Todas");
+  const [filterComite, setFilterComite]     = useState("Todos");
+  const [soloVencidos, setSoloVencidos]     = useState(false);
+  const [search, setSearch]                 = useState("");
+  const [selected, setSelected]             = useState(null);
+
+  const load = async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(sheetUrl);
+      const txt = await res.text();
+      const rows = parseGviz(txt).filter(r => r["Nombre del proyecto"]);
+      setProyectos(rows);
+      setLastUpdate(new Date().toLocaleTimeString("es-AR"));
+    } catch(e) {
+      setError("No se pudo conectar con Google Sheets. Verificá tu conexión.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const ESTADOS    = ["Iniciado","En curso","Pausado","Etapa final","Finalizado"];
+  const PRIORIDADES = ["Alta","Media","Baja"];
+
+  const comites = useMemo(() => {
+    const set = new Set(proyectos.map(p => p["Comité"]).filter(Boolean));
+    return ["Todos", ...Array.from(set).sort()];
+  }, [proyectos]);
+
+  const counts = useMemo(() => {
+    const c = {};
+    ESTADOS.forEach(e => c[e] = proyectos.filter(p => p["Estado"] === e).length);
+    c.vencidos = proyectos.filter(isVencido).length;
+    return c;
+  }, [proyectos]);
+
+  const filtered = useMemo(() => proyectos.filter(p => {
+    if (filterEstado !== "Todos" && p["Estado"] !== filterEstado) return false;
+    if (filterPrioridad !== "Todas" && p["Prioridad"] !== filterPrioridad) return false;
+    if (filterComite !== "Todos" && p["Comité"] !== filterComite) return false;
+    if (soloVencidos && !isVencido(p)) return false;
+    if (search && !p["Nombre del proyecto"].toLowerCase().includes(search.toLowerCase()) &&
+        !(p["Descripción"]||"").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }).sort((a,b) => {
+    const pOrd = { Alta:0, Media:1, Baja:2 };
+    if (isVencido(a) !== isVencido(b)) return isVencido(a) ? -1 : 1;
+    return (pOrd[a["Prioridad"]]??1) - (pOrd[b["Prioridad"]]??1);
+  }), [proyectos, filterEstado, filterPrioridad, filterComite, soloVencidos, search]);
+
+  const pill = (active, color) => ({
+    padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700,
+    border:"none", cursor:"pointer",
+    background: active ? (color||"#1A3A6B") : "#F1F5F9",
+    color: active ? "#fff" : "#64748B",
+  });
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#F0F4F8" }}>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(135deg,#1A3A6B 0%,#0F2347 100%)", padding:"20px 20px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+          <div style={{ width:30, height:30, borderRadius:"50%", background:"#F7CA45", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚙</div>
+          <span style={{ color:"#F7CA45", fontWeight:800, fontSize:16 }}>Rotary Club Santa Teresita</span>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:8 }}>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:20 }}>Tablero de Proyectos</div>
+            <div style={{ color:"rgba(255,255,255,0.45)", fontSize:11, marginTop:2 }}>2026/2027 {lastUpdate && `· ${lastUpdate}`}</div>
+          </div>
+          <button onClick={load} style={{ background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", color:"#fff", padding:"7px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>↻ Actualizar</button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:960, margin:"0 auto", padding:"20px 14px" }}>
+
+        {/* Stats */}
+        {!loading && !error && (
+          <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+            {ESTADOS.map(e => {
+              const c = ESTADO_COLORS[e];
+              return (
+                <div key={e} onClick={() => setFilterEstado(filterEstado===e?"Todos":e)} style={{
+                  background:"#fff", borderRadius:12, padding:"12px 16px", flex:"1 1 110px",
+                  border:`2px solid ${filterEstado===e?c.dot:"transparent"}`,
+                  cursor:"pointer", boxShadow:"0 1px 3px rgba(0,0,0,0.06)", transition:"all 0.15s",
+                }}>
+                  <div style={{ fontSize:22, fontWeight:800, color:c.text }}>{counts[e]}</div>
+                  <div style={{ fontSize:11, color:"#94A3B8", fontWeight:600 }}>{e}</div>
+                </div>
+              );
+            })}
+            {counts.vencidos > 0 && (
+              <div onClick={() => setSoloVencidos(!soloVencidos)} style={{
+                background: soloVencidos?"#FEF2F2":"#fff", borderRadius:12, padding:"12px 16px", flex:"1 1 110px",
+                border:`2px solid ${soloVencidos?"#DC2626":"transparent"}`,
+                cursor:"pointer", boxShadow:"0 1px 3px rgba(0,0,0,0.06)", transition:"all 0.15s",
+              }}>
+                <div style={{ fontSize:22, fontWeight:800, color:"#DC2626" }}>{counts.vencidos}</div>
+                <div style={{ fontSize:11, color:"#94A3B8", fontWeight:600 }}>⚠ Vencidos</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Filters */}
+        <div style={{ background:"#fff", borderRadius:14, padding:"14px 16px", marginBottom:16, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar proyectos..."
+              style={{ flex:"1 1 180px", padding:"7px 12px", borderRadius:8, border:"1.5px solid #E2E8F0", fontSize:13, outline:"none", background:"#F8FAFC", fontFamily:"inherit" }} />
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              <button style={pill(filterEstado==="Todos")} onClick={() => setFilterEstado("Todos")}>Todos</button>
+              {ESTADOS.map(e => <button key={e} style={pill(filterEstado===e)} onClick={() => setFilterEstado(filterEstado===e?"Todos":e)}>{e}</button>)}
+            </div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {PRIORIDADES.map(p => <button key={p} style={pill(filterPrioridad===p)} onClick={() => setFilterPrioridad(filterPrioridad===p?"Todas":p)}>↑ {p}</button>)}
+            </div>
+            <select value={filterComite} onChange={e => setFilterComite(e.target.value)} style={{
+              padding:"7px 10px", borderRadius:8, border:"1.5px solid #E2E8F0",
+              fontSize:12, color:"#475569", background:"#F8FAFC", fontFamily:"inherit",
+            }}>
+              {comites.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Content */}
+        {loading && <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}><Spinner /></div>}
+
+        {error && (
+          <div style={{ background:"#fff", borderRadius:14, padding:"40px 20px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize:32, marginBottom:10 }}>⚠️</div>
+            <div style={{ color:"#EF4444", fontWeight:700, marginBottom:12 }}>{error}</div>
+            <button onClick={load} style={{ background:"#1A3A6B", color:"#fff", border:"none", padding:"9px 22px", borderRadius:8, cursor:"pointer", fontWeight:700 }}>Reintentar</button>
+          </div>
+        )}
+
+        {!loading && !error && filtered.length === 0 && (
+          <div style={{ background:"#fff", borderRadius:14, padding:"60px 20px", textAlign:"center", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize:40, marginBottom:10 }}>📋</div>
+            <p style={{ fontSize:14, color:"#94A3B8", margin:0 }}>
+              {proyectos.length === 0 ? "La planilla aún no tiene proyectos cargados." : "No hay proyectos que coincidan con los filtros."}
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && filtered.length > 0 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {filtered.map((p, i) => {
+              const c = ESTADO_COLORS[p["Estado"]] || ESTADO_COLORS["Iniciado"];
+              const vencido = isVencido(p);
+              const presupuesto = fmtARS(p["Presupuesto (ARS)"]);
+              return (
+                <div key={i} onClick={() => setSelected(selected===i?null:i)} style={{
+                  background: vencido?"#FFFBFB":"#fff",
+                  borderRadius:14, padding:"16px 20px",
+                  boxShadow:"0 1px 3px rgba(0,0,0,0.06)",
+                  cursor:"pointer",
+                  borderLeft:`4px solid ${vencido?"#EF4444":c.dot}`,
+                  transition:"box-shadow 0.15s, transform 0.1s",
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.10)"; e.currentTarget.style.transform="translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.06)"; e.currentTarget.style.transform="none"; }}
+                >
+                  {/* Main row */}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:12, alignItems:"start" }}>
+                    <div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, flexWrap:"wrap" }}>
+                        <h3 style={{ margin:0, fontSize:14, fontWeight:800, color:"#0F172A" }}>{p["Nombre del proyecto"]}</h3>
+                        <Badge estado={p["Estado"]} />
+                        <PrioBadge prioridad={p["Prioridad"]} />
+                        {vencido && <span style={{ background:"#FEF2F2", color:"#DC2626", padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:700, border:"1px solid #FECACA" }}>⚠ Vencido</span>}
+                      </div>
+                      <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
+                        {p["Comité"] && <span style={{ fontSize:11, color:"#94A3B8" }}><span style={{ color:"#CBD5E1" }}>Comité · </span>{p["Comité"]}</span>}
+                        {p["Responsable"] && <span style={{ fontSize:11, color:"#94A3B8" }}><span style={{ color:"#CBD5E1" }}>Resp. · </span>{p["Responsable"]}</span>}
+                        {fmtDate(p["Fecha inicio"]) && <span style={{ fontSize:11, color:"#94A3B8" }}><span style={{ color:"#CBD5E1" }}>Inicio · </span>{fmtDate(p["Fecha inicio"])}</span>}
+                        {fmtDate(p["Fecha fin"]) && <span style={{ fontSize:11, color: vencido?"#EF4444":"#94A3B8", fontWeight: vencido?700:400 }}><span style={{ color:"#CBD5E1" }}>Fin · </span>{fmtDate(p["Fecha fin"])}</span>}
+                        {presupuesto && <span style={{ fontSize:11, color:"#94A3B8" }}><span style={{ color:"#CBD5E1" }}>Presupuesto · </span>{presupuesto}</span>}
+                      </div>
+                    </div>
+                    <span style={{ color:"#CBD5E1", fontSize:18, transform: selected===i?"rotate(90deg)":"none", transition:"transform 0.2s" }}>›</span>
+                  </div>
+
+                  {/* Expanded description */}
+                  {selected === i && p["Descripción"] && (
+                    <div style={{ marginTop:12, paddingTop:12, borderTop:"1px solid #F1F5F9" }}>
+                      <p style={{ fontSize:13, color:"#475569", lineHeight:1.6, margin:0 }}>{p["Descripción"]}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ textAlign:"center", fontSize:11, color:"#CBD5E1", marginTop:16 }}>
+          Conectado a Google Sheets · Datos en tiempo real
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
