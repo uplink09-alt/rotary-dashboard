@@ -273,6 +273,7 @@ function App() {
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
   const [resumen, setResumen]       = useState([]);
+  const [config, setConfig]         = useState([]);
   const [movimientos, setMovimientos] = useState([]);
   const [obligaciones, setObligaciones] = useState([]);
   const [cuotas, setCuotas]         = useState([]);
@@ -283,16 +284,17 @@ function App() {
   const load = async () => {
     setLoading(true); setError(null);
     try {
-      const [res, mov, obl, cuo] = await Promise.all([
+      const [res, mov, obl, cuo, cfg] = await Promise.all([
         fetchSheet("Resumen"),
         fetchSheet("Movimientos"),
         fetchSheet("Obligaciones"),
         fetchSheet("Cuotas"),
+        fetchSheet("Config"),
       ]);
       setResumen(res);
+      setConfig(cfg);
       setMovimientos(mov.filter(m => m["Fecha"] && m["Monto"]));
       setObligaciones(obl.filter(o => o["Obligación"]));
-      // Cuotas: filtrar filas válidas (con nombre de socio)
       setCuotas(cuo.filter(r => r["Socio"] && !r["Socio"].includes("Valor cuota")));
       setLastUpdate(new Date().toLocaleTimeString("es-AR"));
     } catch(e) {
@@ -307,45 +309,54 @@ function App() {
   const saldoRow  = (f) => resumen.find(r => String(Object.values(r)[0]||"").trim() === f) || {};
   const totalRow  = resumen.find(r => String(Object.values(r)[0]||"").includes("TOTAL")) || {};
 
-  // Calcular saldos desde Movimientos como fallback si Resumen tiene ceros
   const saldosCalculados = useMemo(() => {
     const result = {};
     fondos.forEach(f => {
       result[f] = { arsEfectivo:0, arsBanco:0, usdEfectivo:0, usdBanco:0 };
     });
-    // Usar todos los movimientos, no solo los últimos 50
-    const allMov = movimientos; // ya están cargados
-    allMov.forEach(m => {
+    // Sumar saldos iniciales desde Config
+    config.forEach(row => {
+      const fondo = row["Fondo"] || row["fondo"];
+      const moneda = row["Moneda"] || row["moneda"];
+      const ubicacion = row["Ubicación"] || row["Ubicacion"] || row["ubicación"] || row["ubicacion"];
+      const saldo = Number(row["Saldo inicial"] || row["saldo inicial"] || 0);
+      if (!result[fondo] || !saldo) return;
+      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += saldo;
+      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += saldo;
+      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += saldo;
+      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += saldo;
+    });
+    movimientos.forEach(m => {
       const fondo = m["Fondo"];
       if (!result[fondo]) return;
       const moneda = m["Moneda"] || "ARS";
-      const ubicacion = m["Ubicación"] || "Efectivo";
-      const monto = Number(m["Monto"]) || 0;
-      const tipo = m["Tipo"] || "";
-      const esIngreso = ["Ingreso","Custodia recibida","Transferencia entrada","Estipendio recibido","Préstamo recibido"].includes(tipo);
-      const esEgreso  = ["Egreso","Custodia devuelta","Transferencia salida","Custodia uso","Estipendio pagado","Devolución préstamo"].includes(tipo);
-      const signo = esIngreso ? 1 : esEgreso ? -1 : 0;
-      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += signo * monto;
-      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += signo * monto;
-      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += signo * monto;
-      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += signo * monto;
+      const ubicacion = m["Übicación"] || m["Ubicacion"] || m["ubicación"] || m["ubicacion"] || "Efectivo";
+      let efecto = Number(m["Efecto (auto)"] || m["Efecto"] || 0);
+      if (efecto === 0) {
+        const monto = Number(m["Monto"] || 0);
+        const tipo = m["Tipo"] || "";
+        const esPos = ["Ingreso","Custodia recibida","Transferencia entrada","Estipendio recibido","Préstamo recibido"].includes(tipo);
+        const esNeg = ["Egreso","Custodia devuelta","Transferencia salida","Custodia uso","Estipendio pagado","Devolución préstamo"].includes(tipo);
+        efecto = esPos ? monto : esNeg ? -monto : 0;
+      }
+      if (!efecto) return;
+      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += efecto;
+      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += efecto;
+      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += efecto;
+      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += efecto;
     });
     return result;
   }, [movimientos]);
 
-  // Usar Resumen si tiene datos, si no usar el calculado
   const getSaldo = (fondo, key) => {
-    const row = saldoRow(fondo);
-    const val = getByKey(row, key);
-    if (val !== 0) return val;
-    // Fallback a calculado
     const calc = saldosCalculados[fondo] || {};
-    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("efectivo")) return calc.arsEfectivo || 0;
-    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("banco"))    return calc.arsBanco || 0;
-    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("total"))    return (calc.arsEfectivo||0) + (calc.arsBanco||0);
-    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("efectivo")) return calc.usdEfectivo || 0;
-    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("banco"))    return calc.usdBanco || 0;
-    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("total"))    return (calc.usdEfectivo||0) + (calc.usdBanco||0);
+    const k = key.toLowerCase();
+    if (k.includes("ars") && k.includes("efectivo")) return calc.arsEfectivo || 0;
+    if (k.includes("ars") && k.includes("banco"))    return calc.arsBanco || 0;
+    if (k.includes("ars") && k.includes("total"))    return (calc.arsEfectivo||0) + (calc.arsBanco||0);
+    if (k.includes("usd") && k.includes("efectivo")) return calc.usdEfectivo || 0;
+    if (k.includes("usd") && k.includes("banco"))    return calc.usdBanco || 0;
+    if (k.includes("usd") && k.includes("total"))    return (calc.usdEfectivo||0) + (calc.usdBanco||0);
     return 0;
   };
 
