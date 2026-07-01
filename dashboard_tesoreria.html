@@ -20,7 +20,7 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo } = React;
 
-const SHEET_ID = "1NdHKQ1x8RBa5E7TDa5nNjlkQo9PyF07KvnS5YwrTixI";
+const SHEET_ID = "15FIqxHNpaS6whuNi9LJtC6BoU8FdmBCXfBRjnNNtDiI";
 const sheetUrl = (sheet) =>
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}`;
 
@@ -290,7 +290,7 @@ function App() {
         fetchSheet("Cuotas"),
       ]);
       setResumen(res);
-      setMovimientos(mov.filter(m => m["Fecha"] && m["Monto"]).slice(-50).reverse());
+      setMovimientos(mov.filter(m => m["Fecha"] && m["Monto"]));
       setObligaciones(obl.filter(o => o["Obligación"]));
       // Cuotas: filtrar filas válidas (con nombre de socio)
       setCuotas(cuo.filter(r => r["Socio"] && !r["Socio"].includes("Valor cuota")));
@@ -306,14 +306,57 @@ function App() {
   const fondos = ["Club", "Intercambios", "Cocina"];
   const saldoRow  = (f) => resumen.find(r => String(Object.values(r)[0]||"").trim() === f) || {};
   const totalRow  = resumen.find(r => String(Object.values(r)[0]||"").includes("TOTAL")) || {};
-  const grandARS  = getByKey(totalRow, "ARS Total");
-  const grandUSD  = getByKey(totalRow, "USD Total");
 
-  const movFiltrados = movimientos.filter(m => {
+  // Calcular saldos desde Movimientos como fallback si Resumen tiene ceros
+  const saldosCalculados = useMemo(() => {
+    const result = {};
+    fondos.forEach(f => {
+      result[f] = { arsEfectivo:0, arsBanco:0, usdEfectivo:0, usdBanco:0 };
+    });
+    // Usar todos los movimientos, no solo los últimos 50
+    const allMov = movimientos; // ya están cargados
+    allMov.forEach(m => {
+      const fondo = m["Fondo"];
+      if (!result[fondo]) return;
+      const moneda = m["Moneda"] || "ARS";
+      const ubicacion = m["Ubicación"] || "Efectivo";
+      const monto = Number(m["Monto"]) || 0;
+      const tipo = m["Tipo"] || "";
+      const esIngreso = ["Ingreso","Custodia recibida","Transferencia entrada","Estipendio recibido","Préstamo recibido"].includes(tipo);
+      const esEgreso  = ["Egreso","Custodia devuelta","Transferencia salida","Custodia uso","Estipendio pagado","Devolución préstamo"].includes(tipo);
+      const signo = esIngreso ? 1 : esEgreso ? -1 : 0;
+      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += signo * monto;
+      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += signo * monto;
+      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += signo * monto;
+      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += signo * monto;
+    });
+    return result;
+  }, [movimientos]);
+
+  // Usar Resumen si tiene datos, si no usar el calculado
+  const getSaldo = (fondo, key) => {
+    const row = saldoRow(fondo);
+    const val = getByKey(row, key);
+    if (val !== 0) return val;
+    // Fallback a calculado
+    const calc = saldosCalculados[fondo] || {};
+    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("efectivo")) return calc.arsEfectivo || 0;
+    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("banco"))    return calc.arsBanco || 0;
+    if (key.toLowerCase().includes("ars") && key.toLowerCase().includes("total"))    return (calc.arsEfectivo||0) + (calc.arsBanco||0);
+    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("efectivo")) return calc.usdEfectivo || 0;
+    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("banco"))    return calc.usdBanco || 0;
+    if (key.toLowerCase().includes("usd") && key.toLowerCase().includes("total"))    return (calc.usdEfectivo||0) + (calc.usdBanco||0);
+    return 0;
+  };
+
+  const grandARS = fondos.reduce((s,f) => s + getSaldo(f,"ARS Total"), 0);
+  const grandUSD = fondos.reduce((s,f) => s + getSaldo(f,"USD Total"), 0);
+
+  const movFiltrados = movimientos.slice().reverse().filter(m => {
     if (filterFondo !== "Todos" && m["Fondo"] !== filterFondo) return false;
     if (filterTipo  !== "Todos" && m["Tipo"]  !== filterTipo)  return false;
     return true;
-  });
+  }).slice(0, 50);
 
   const oblPendientes = obligaciones
     .filter(o => o["Estado"] !== "Pagado" && diasHasta(o["Vencimiento"]) < 90)
@@ -404,10 +447,10 @@ function App() {
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:12 }}>
                           {fondos.map(f => {
                             const row = saldoRow(f);
-                            const arsEf = getByKey(row,"ARS Efectivo"), arsBa = getByKey(row,"ARS Banco");
-                            const arsTo = getByKey(row,"ARS Total") || arsEf+arsBa;
-                            const usdEf = getByKey(row,"USD Efectivo"), usdBa = getByKey(row,"USD Banco");
-                            const usdTo = getByKey(row,"USD Total") || usdEf+usdBa;
+                            const arsEf = getSaldo(f,"ARS Efectivo"), arsBa = getSaldo(f,"ARS Banco");
+                            const arsTo = getSaldo(f,"ARS Total");
+                            const usdEf = getSaldo(f,"USD Efectivo"), usdBa = getSaldo(f,"USD Banco");
+                            const usdTo = getSaldo(f,"USD Total");
                             const color = FONDO_COLORS[f]||"#1A3A6B";
                             return (
                               <div key={f} style={{ flex:"1 1 180px", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 3px rgba(0,0,0,0.07)" }}>
