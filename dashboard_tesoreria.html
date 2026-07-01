@@ -285,13 +285,13 @@ function App() {
     setLoading(true); setError(null);
     try {
       const [res, mov, obl, cuo, cfg] = await Promise.all([
-        fetchSheet("Resumen"),
+        fetchSheet("Saldos"),
         fetchSheet("Movimientos"),
         fetchSheet("Obligaciones"),
         fetchSheet("Cuotas"),
         fetchSheet("Config"),
       ]);
-      setResumen(res);
+      setResumen(res); // res = hoja Saldos
       setConfig(cfg);
       setMovimientos(mov.filter(m => m["Fecha"] && m["Monto"]));
       setObligaciones(obl.filter(o => o["Obligación"]));
@@ -309,55 +309,10 @@ function App() {
   const saldoRow  = (f) => resumen.find(r => String(Object.values(r)[0]||"").trim() === f) || {};
   const totalRow  = resumen.find(r => String(Object.values(r)[0]||"").includes("TOTAL")) || {};
 
-  const saldosCalculados = useMemo(() => {
-    const result = {};
-    fondos.forEach(f => {
-      result[f] = { arsEfectivo:0, arsBanco:0, usdEfectivo:0, usdBanco:0 };
-    });
-    // Sumar saldos iniciales desde Config
-    config.forEach(row => {
-      const fondo = row["Fondo"] || row["fondo"];
-      const moneda = row["Moneda"] || row["moneda"];
-      const ubicacion = row["Ubicación"] || row["Ubicacion"] || row["ubicación"] || row["ubicacion"];
-      const saldo = Number(row["Saldo inicial"] || row["saldo inicial"] || 0);
-      if (!result[fondo] || !saldo) return;
-      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += saldo;
-      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += saldo;
-      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += saldo;
-      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += saldo;
-    });
-    movimientos.forEach(m => {
-      const fondo = m["Fondo"];
-      if (!result[fondo]) return;
-      const moneda = m["Moneda"] || "ARS";
-      const ubicacion = m["Übicación"] || m["Ubicacion"] || m["ubicación"] || m["ubicacion"] || "Efectivo";
-      let efecto = Number(m["Efecto (auto)"] || m["Efecto"] || 0);
-      if (efecto === 0) {
-        const monto = Number(m["Monto"] || 0);
-        const tipo = m["Tipo"] || "";
-        const esPos = ["Ingreso","Custodia recibida","Transferencia entrada","Estipendio recibido","Préstamo recibido"].includes(tipo);
-        const esNeg = ["Egreso","Custodia devuelta","Transferencia salida","Custodia uso","Estipendio pagado","Devolución préstamo"].includes(tipo);
-        efecto = esPos ? monto : esNeg ? -monto : 0;
-      }
-      if (!efecto) return;
-      if (moneda === "ARS" && ubicacion === "Efectivo") result[fondo].arsEfectivo += efecto;
-      if (moneda === "ARS" && ubicacion === "Banco")    result[fondo].arsBanco    += efecto;
-      if (moneda === "USD" && ubicacion === "Efectivo") result[fondo].usdEfectivo += efecto;
-      if (moneda === "USD" && ubicacion === "Banco")    result[fondo].usdBanco    += efecto;
-    });
-    return result;
-  }, [movimientos]);
-
+  // Leer saldos directamente desde hoja Saldos
   const getSaldo = (fondo, key) => {
-    const calc = saldosCalculados[fondo] || {};
-    const k = key.toLowerCase();
-    if (k.includes("ars") && k.includes("efectivo")) return calc.arsEfectivo || 0;
-    if (k.includes("ars") && k.includes("banco"))    return calc.arsBanco || 0;
-    if (k.includes("ars") && k.includes("total"))    return (calc.arsEfectivo||0) + (calc.arsBanco||0);
-    if (k.includes("usd") && k.includes("efectivo")) return calc.usdEfectivo || 0;
-    if (k.includes("usd") && k.includes("banco"))    return calc.usdBanco || 0;
-    if (k.includes("usd") && k.includes("total"))    return (calc.usdEfectivo||0) + (calc.usdBanco||0);
-    return 0;
+    const row = resumen.find(r => String(Object.values(r)[0]||"").trim() === fondo) || {};
+    return getByKey(row, key);
   };
 
   const grandARS = fondos.reduce((s,f) => s + getSaldo(f,"ARS Total"), 0);
